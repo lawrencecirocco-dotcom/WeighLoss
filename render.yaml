@@ -1,0 +1,36 @@
+# Review Render's displayed price before creating this paid, personal service.
+# This file prepares deployment; it does not create a service or incur charges.
+services:
+  - type: web
+    name: lighter-personal
+    runtime: node
+    plan: starter
+    buildCommand: npm ci --no-audit --no-fund && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    disk:
+      name: lighter-data
+      mountPath: /var/data/lighter
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: NODE_USE_ENV_PROXY
+        value: "1"
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "10000"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATA_DIR
+        value: /var/data/lighter
+      - key: APP_PASSWORD
+        sync: false
+      - key: DATA_ENCRYPTION_KEY
+        generateValue: true
+# The server uses Render's RENDER_EXTERNAL_URL as its public origin automatically.
+# Connect Fitbit and AI from the signed-in app instead of adding keys here.
