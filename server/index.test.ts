@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
@@ -768,3 +770,83 @@ test("legacy local Fitbit tokens migrate into encryption and a wrong key cannot 
     await f.stop();
   }
 });
+
+test(
+  "host-managed disk starts and preserves data when chmod on the mount root is forbidden",
+  { concurrency: false },
+  async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "lighter-managed-disk-"));
+    fs.chmodSync(dir, 0o755);
+    const originalChmod = fs.chmodSync;
+    t.mock.method(
+      fs,
+      "chmodSync",
+      (
+        path: Parameters<typeof fs.chmodSync>[0],
+        mode: Parameters<typeof fs.chmodSync>[1],
+      ) => {
+        if (String(path) === dir)
+          throw Object.assign(new Error("Host owns the mount root"), {
+            code: "EPERM",
+          });
+        return originalChmod(path, mode);
+      },
+    );
+    syncBuiltinESMExports();
+    let f: Awaited<ReturnType<typeof fixture>> | undefined;
+    try {
+      f = await fixture(dir);
+      const state = { profile: { name: "Managed disk test" }, water: 750 };
+      assert.equal(
+        (
+          await fetch(`${f.url}/api/state`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(state),
+          })
+        ).status,
+        200,
+      );
+      const image = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=",
+        "base64",
+      );
+      const upload = new FormData();
+      upload.set(
+        "photo",
+        new Blob([image], { type: "image/png" }),
+        "progress.png",
+      );
+      const response = await fetch(`${f.url}/api/photos`, {
+        method: "POST",
+        body: upload,
+      });
+      assert.equal(response.status, 201);
+      const photo = (await response.json()) as { url: string };
+      assert.equal(
+        fs.statSync(dir).mode & 0o777,
+        0o755,
+        "host mount permissions remain unchanged",
+      );
+      assert.equal(fs.statSync(join(dir, "photos")).mode & 0o777, 0o700);
+      assert.equal(
+        fs.statSync(join(dir, "weighloss.sqlite")).mode & 0o777,
+        0o600,
+      );
+      await f.stop(false);
+      f = undefined;
+      f = await fixture(dir);
+      assert.deepEqual(await (await fetch(`${f.url}/api/state`)).json(), {
+        state,
+      });
+      const retrieved = await fetch(`${f.url}${photo.url}`);
+      assert.equal(retrieved.status, 200);
+      assert.deepEqual(Buffer.from(await retrieved.arrayBuffer()), image);
+    } finally {
+      if (f) await f.stop(false);
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);

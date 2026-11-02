@@ -120,9 +120,13 @@ export function createApp(options: ServerOptions = {}) {
   const model =
     options.openaiModel ?? process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
   const remoteFetch = options.fetcher ?? fetch;
+  // DATA_DIR may be a host-managed persistent-disk mount. Create it when
+  // needed, but never change its permissions: Render owns the mount root.
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const uploadsDir = join(dataDir, "photos");
   mkdirSync(uploadsDir, { recursive: true, mode: 0o700 });
-  chmodSync(dataDir, 0o700);
+  // Restrict the app-owned child directory and database instead of the mount.
+  chmodSync(uploadsDir, 0o700);
   const db = new DatabaseSync(join(dataDir, "weighloss.sqlite"));
   chmodSync(join(dataDir, "weighloss.sqlite"), 0o600);
   db.exec(
